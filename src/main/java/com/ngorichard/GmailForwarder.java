@@ -36,7 +36,7 @@ import java.util.List;
 import java.util.Properties;
 
 /**
- * 
+ *
  */
 public class GmailForwarder {
     private static final String APPLICATION_NAME = "gmail forwarder";
@@ -90,8 +90,9 @@ public class GmailForwarder {
         }
         if(args.length > 0){
             credentialsPath = args[0];
-            from = args[1];
-            to = args[2];
+            recipients = args[1];
+            from = args[2];
+            to = args[3];
         }
         final NetHttpTransport HTTP_TRANSPORT = GoogleNetHttpTransport.newTrustedTransport();
         service = new Gmail.Builder(HTTP_TRANSPORT, JSON_FACTORY, getCredentials(HTTP_TRANSPORT, credentialsPath))
@@ -121,32 +122,33 @@ public class GmailForwarder {
             }
         }
         if(fromLabelId != null && toLabelId != null) {
-            getMails();
+
+            getMails(getJsonRecipients(recipients));
         } else {
             throw new IllegalArgumentException(String.format("Did not find labels provided - from [ Name :%s - ID: %s ] | to: [ Name: %s - ID: %s]", from, fromLabelId, to, toLabelId));
         }
     }
 
-    public static void getMails() throws IOException {
+    public static void getMails(List<Address> jsonRecipients) throws IOException {
         ListMessagesResponse emails = service.users().messages().list("me").setLabelIds(new ArrayList<String>(){{add(fromLabelId);}}).execute();
         if(emails.getMessages() != null){
             logger.info("There are " + emails.getMessages().size() + " messages to be processed");
             for(Message message: emails.getMessages()) {
-                fetchEmail(message);
+                fetchEmail(message, jsonRecipients);
             }
         } else {
             logger.info("There are no message currently to be forwarded");
         }
     }
 
-    public static void fetchEmail(Message msg) throws IOException {
+    public static void fetchEmail(Message msg, List<Address> jsonRecipients) throws IOException {
         Message message = service.users().messages().get("me", msg.getId()).setFormat("raw").execute();
         try {
             MimeMessage mimeMessage = getMimeMessage(message);
             logger.info("Processing email with title ["+mimeMessage.getSubject()+"]");
 
             // Add new recipients
-            List<Address> recipients = getJsonRecipients();
+            List<Address> recipients = jsonRecipients;
             mimeMessage.setRecipients(javax.mail.Message.RecipientType.TO,recipients.toArray(new Address[recipients.size()]));
 
             logger.info("Just before sending the email");
@@ -171,20 +173,20 @@ public class GmailForwarder {
         }
     }
 
-    private static List<Address> getJsonRecipients(){
+    private static List<Address> getJsonRecipients(String recipients) throws FileNotFoundException {
         JsonParser parser = new JsonParser();
-        JsonElement recipientsJson = parser.parse(new InputStreamReader(GmailForwarder.class.getResourceAsStream("/recipients.json")));
+        JsonElement recipientsJson = parser.parse(new InputStreamReader(new FileInputStream(recipients)));
         JsonArray toRecipientsJson = recipientsJson.getAsJsonObject().get("to").getAsJsonArray();
-        List<Address> recipients = new ArrayList<>();
+        List<Address> r = new ArrayList<>();
         for( JsonElement recipient: toRecipientsJson ) {
             try {
                 logger.info("Adding " + recipient.getAsString() + " to recipients");
-                recipients.add(new InternetAddress(recipient.getAsString()));
+                r.add(new InternetAddress(recipient.getAsString()));
             } catch (AddressException e) {
                 e.printStackTrace();
             }
         }
-        return recipients;
+        return r;
     }
 
     public static MimeMessage getMimeMessage(Message message)
